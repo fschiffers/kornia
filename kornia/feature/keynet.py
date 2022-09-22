@@ -45,8 +45,10 @@ class _FeatureExtractor(nn.Module):
         self.lb_block = _LearnableBlock()
 
     def forward(self, x: Tensor) -> Tensor:
-        x_hc = self.hc_block(x)
-        x_lb = self.lb_block(x_hc)
+        cpu = torch.device('cpu')
+        mps = torch.device('mps')
+        x_hc = self.hc_block.to(cpu)(x.to(cpu))
+        x_lb = self.lb_block.to(mps)(x_hc.to(mps))#.cpu()
         return x_lb
 
 
@@ -153,6 +155,8 @@ class KeyNet(nn.Module):
         """
         x - input image
         """
+        #mps=torch.device('cpu')
+        cpu=torch.device('cpu')
         shape_im = x.shape
         feats: List[Tensor] = [self.feature_extractor(x)]
         for i in range(1, self.num_levels):
@@ -160,7 +164,7 @@ class KeyNet(nn.Module):
             feats_i = self.feature_extractor(x)
             feats_i = F.interpolate(feats_i, size=(shape_im[2], shape_im[3]), mode='bilinear')
             feats.append(feats_i)
-        scores = self.last_conv(torch.cat(feats, dim=1))
+        scores = self.last_conv.to(cpu)(torch.cat(feats, dim=1).cpu())
         return scores
 
 
@@ -211,7 +215,9 @@ class KeyNetDetector(nn.Module):
     def detect_features_on_single_level(
         self, level_img: Tensor, num_kp: int, factor: Tuple[float, float]
     ) -> Tuple[Tensor, Tensor]:
-        det_map = self.nms(self.remove_borders(self.model(level_img)))
+        #det_map = self.nms(self.remove_borders(self.model(level_img.to(dev1)).cpu()))
+        mps=torch.device('mps')
+        det_map = self.nms(self.remove_borders(self.model.to(mps)(level_img.to(mps))))
         device = level_img.device
         dtype = level_img.dtype
         yx = det_map.nonzero()[:, 2:].t()
@@ -234,6 +240,7 @@ class KeyNetDetector(nn.Module):
         self, img: Tensor, mask: Optional[Tensor] = None  # type: ignore
     ) -> Tuple[Tensor, Tensor]:
         # Compute points per level
+        dev1=torch.device('mps')
         num_features_per_level: List[float] = []
         tmp = 0.0
         factor_points = self.scale_factor_levels**2
@@ -258,7 +265,7 @@ class KeyNetDetector(nn.Module):
             up_factor = self.scale_factor_levels ** (1 + idx_level)
             nh, nw = int(h * up_factor), int(w * up_factor)
             up_factor_kpts = (float(w) / float(nw), float(h) / float(nh))
-            img_up = F.interpolate(img_up, (nh, nw), mode='bilinear', align_corners=False)
+            img_up = F.interpolate(img_up.to(dev1), (nh, nw), mode='bilinear', align_corners=False).cpu()
 
             cur_scores, cur_lafs = self.detect_features_on_single_level(img_up, num_points_level, up_factor_kpts)
 
@@ -268,7 +275,7 @@ class KeyNetDetector(nn.Module):
         # Extract features from the downsampling pyramid
         for idx_level in range(self.num_pyramid_levels + 1):
             if idx_level > 0:
-                cur_img = pyrdown(cur_img, factor=self.scale_factor_levels)
+                cur_img = pyrdown(cur_img.to(dev1), factor=self.scale_factor_levels).cpu()
                 _, _, nh, nw = cur_img.shape
                 factor = (float(w) / float(nw), float(h) / float(nh))
             else:

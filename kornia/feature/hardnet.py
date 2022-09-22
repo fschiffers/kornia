@@ -85,8 +85,11 @@ class HardNet(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         KORNIA_CHECK_SHAPE(input, ["B", "1", "32", "32"])
-        x_norm: torch.Tensor = self._normalize_input(input)
-        x_features: torch.Tensor = self.features(x_norm)
+        x_norm: torch.Tensor = self._normalize_input(input).to(torch.device('mps'))
+        
+        x_features: torch.Tensor = self.features.to(torch.device('mps'))(x_norm).cpu()
+        #x_norm: torch.Tensor = self._normalize_input(input)#.to(torch.device('mps'))
+        #x_features: torch.Tensor = self.features(x_norm)#.to(torch.device('mps'))(x_norm).cpu()
         x_out = x_features.view(x_features.size(0), -1)
         return F.normalize(x_out, dim=1)
 

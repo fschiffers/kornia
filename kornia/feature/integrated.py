@@ -44,7 +44,7 @@ def get_laf_descriptors(
     patch_descriptor.eval()
 
     timg: torch.Tensor = img
-    if lafs.shape[1] == 0:
+    if (lafs.shape[1] == 0) or (lafs.shape[0] == 0):
         warnings.warn(f"LAF contains no keypoints {lafs.shape}, returning empty tensor")
         return torch.empty(lafs.shape[0], lafs.shape[1], 128)
     if grayscale_descriptor and img.size(1) == 3:

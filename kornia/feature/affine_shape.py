@@ -133,7 +133,8 @@ class LAFAffineShapeEstimator(nn.Module):
         B, N = laf.shape[:2]
         PS: int = self.patch_size
         patches: torch.Tensor = extract_patches_from_pyramid(img, make_upright(laf), PS, True).view(-1, 1, PS, PS)
-        ellipse_shape: torch.Tensor = self.affine_shape_detector(patches)
+        patches = patches.to(torch.device('mps'))
+        ellipse_shape: torch.Tensor = self.affine_shape_detector.to(torch.device('mps'))(patches).cpu()
         ellipses = torch.cat([laf.view(-1, 2, 3)[..., 2].unsqueeze(1), ellipse_shape], dim=2).view(B, N, 5)
         scale_orig = get_laf_scale(laf)
         if self.preserve_orientation:
@@ -224,9 +225,15 @@ class LAFAffNetShapeEstimator(nn.Module):
         KORNIA_CHECK_LAF(laf)
         KORNIA_CHECK_SHAPE(img, ["B", "1", "H", "W"])
         B, N = laf.shape[:2]
+        if (B == 0) or (N == 0):
+            return laf
         PS: int = self.patch_size
         patches: torch.Tensor = extract_patches_from_pyramid(img, make_upright(laf), PS, True).view(-1, 1, PS, PS)
-        xy = self.features(self._normalize_input(patches)).view(-1, 3)
+        patches = self._normalize_input(patches)
+        patches = patches.to(torch.device('mps'))
+        xy = self.features.to(torch.device('mps'))(patches).view(-1, 3).cpu()
+        #patches = patches.to(torch.device('mps'))
+        #xy = self.features(patches).view(-1, 3)#.cpu()
         a1 = torch.cat([1.0 + xy[:, 0].reshape(-1, 1, 1), 0 * xy[:, 0].reshape(-1, 1, 1)], dim=2)
         a2 = torch.cat([xy[:, 1].reshape(-1, 1, 1), 1.0 + xy[:, 2].reshape(-1, 1, 1)], dim=2)
         new_laf_no_center = torch.cat([a1, a2], dim=1).reshape(B, N, 2, 2)
