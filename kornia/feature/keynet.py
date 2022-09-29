@@ -20,10 +20,12 @@ keynet_config = {
         'num_levels': 3,
         'kernel_size': 5,
         # Extraction Parameters
-        'nms_size': 15,
+        #'nms_size': 15,
+        'nms_size': 9,
+        #'pyramid_levels': 4,
         'pyramid_levels': 4,
         'up_levels': 1,
-        'scale_factor_levels': math.sqrt(2),
+        'scale_factor_levels': math.sqrt(2.0),
         's_mult': 22,
     }
 }
@@ -60,6 +62,9 @@ class _HandcraftedBlock(nn.Module):
         self.spatial_gradient = SpatialGradient('sobel', 1)
 
     def forward(self, x: Tensor) -> Tensor:
+        mps = torch.device('mps')
+        c = torch.device('mps')
+        #x_m = x.to(mps)
 
         sobel = self.spatial_gradient(x)
         dx, dy = sobel[:, :, 0, :, :], sobel[:, :, 1, :, :]
@@ -69,8 +74,8 @@ class _HandcraftedBlock(nn.Module):
 
         sobel_dy = self.spatial_gradient(dy)
         dyy = sobel_dy[:, :, 1, :, :]
-
-        hc_feats = torch.cat([dx, dy, dx**2.0, dy**2.0, dx * dy, dxy, dxy**2.0, dxx, dyy, dxx * dyy], dim=1)
+        all_f = [dx, dy, dx**2.0, dy**2.0, dx * dy, dxy, dxy**2.0, dxx, dyy, dxx * dyy]#, dim=1)
+        hc_feats = torch.cat(all_f, dim=1)
 
         return hc_feats
 
@@ -217,7 +222,7 @@ class KeyNetDetector(nn.Module):
     ) -> Tuple[Tensor, Tensor]:
         #det_map = self.nms(self.remove_borders(self.model(level_img.to(dev1)).cpu()))
         mps=torch.device('mps')
-        det_map = self.nms(self.remove_borders(self.model.to(mps)(level_img.to(mps))))
+        det_map = self.nms.to(mps)(self.remove_borders(self.model.to(mps)(level_img.to(mps))))
         device = level_img.device
         dtype = level_img.dtype
         yx = det_map.nonzero()[:, 2:].t()
@@ -263,6 +268,7 @@ class KeyNetDetector(nn.Module):
 
             # Resize input image
             up_factor = self.scale_factor_levels ** (1 + idx_level)
+            #print (up_factor)
             nh, nw = int(h * up_factor), int(w * up_factor)
             up_factor_kpts = (float(w) / float(nw), float(h) / float(nh))
             img_up = F.interpolate(img_up.to(dev1), (nh, nw), mode='bilinear', align_corners=False).cpu()
