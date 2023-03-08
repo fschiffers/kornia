@@ -345,8 +345,8 @@ def denormalize_laf(LAF: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     """
     raise_error_if_laf_is_not_valid(LAF)
     _, _, h, w = images.size()
-    wf = float(w)
-    hf = float(h)
+    wf = float(w - 1.0)
+    hf = float(h - 1.0)
     min_size = min(hf, wf)
     coef = torch.ones(1, 1, 2, 3).to(LAF.dtype).to(LAF.device) * min_size
     coef[0, 0, 0, 2] = wf
@@ -377,8 +377,8 @@ def normalize_laf(LAF: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     """
     raise_error_if_laf_is_not_valid(LAF)
     _, _, h, w = images.size()
-    wf: float = float(w)
-    hf: float = float(h)
+    wf: float = float(w - 1.0)
+    hf: float = float(h - 1.0)
     min_size = min(hf, wf)
     coef = torch.ones(1, 1, 2, 3).to(LAF.dtype).to(LAF.device) / min_size
     coef[0, 0, 0, 2] = 1.0 / wf
@@ -406,8 +406,8 @@ def generate_patch_grid_from_normalized_LAF(img: torch.Tensor, LAF: torch.Tensor
     LAF_renorm = denormalize_laf(LAF, img)
 
     grid = F.affine_grid(LAF_renorm.view(B * N, 2, 3), [B * N, ch, PS, PS], align_corners=False)  # type: ignore
-    grid[..., :, 0] = 2.0 * grid[..., :, 0].clone() / float(w) - 1.0
-    grid[..., :, 1] = 2.0 * grid[..., :, 1].clone() / float(h) - 1.0
+    grid[..., :, 0] = 2.0 * grid[..., :, 0].clone() / float(w - 1.0) - 1.0
+    grid[..., :, 1] = 2.0 * grid[..., :, 1].clone() / float(h - 1.0) - 1.0
     return grid
 
 
@@ -473,16 +473,19 @@ def extract_patches_from_pyramid(
     B, N, _, _ = laf.size()
     _, ch, h, w = img.size()
     scale = 2.0 * get_laf_scale(denormalize_laf(nlaf, img)) / float(PS)
-    pyr_idx = scale.log2().relu().long()
+    max_level = min(img.size(2), img.size(3))  // PS 
+    pyr_idx = scale.log2().clamp(min=0.0, max=max(0, max_level - 1)).long()
     cur_img = img
     cur_pyr_level = 0
     out = torch.zeros(B, N, ch, PS, PS).to(nlaf.dtype).to(nlaf.device)
-    while min(cur_img.size(2), cur_img.size(3)) >= PS:
+    we_are_in_business = True
+    while we_are_in_business:
         _, ch, h, w = cur_img.size()
         # for loop temporarily, to be refactored
         for i in range(B):
             scale_mask = (pyr_idx[i] == cur_pyr_level).squeeze()
-            if (scale_mask.float().sum()) == 0:
+            print (scale_mask)
+            if (scale_mask.float().sum().item()) == 0:
                 continue
             scale_mask = (scale_mask > 0).view(-1)
             grid = generate_patch_grid_from_normalized_LAF(cur_img[i: i + 1], nlaf[i: i + 1, scale_mask, :, :], PS)
@@ -493,6 +496,9 @@ def extract_patches_from_pyramid(
                 align_corners=False,
             )
             out[i].masked_scatter_(scale_mask.view(-1, 1, 1, 1), patches)
+        we_are_in_business = min(cur_img.size(2), cur_img.size(3)) >= PS
+        if not we_are_in_business:
+            break
         cur_img = pyrdown(cur_img)
         cur_pyr_level += 1
     return out
